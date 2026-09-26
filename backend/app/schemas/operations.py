@@ -3,14 +3,18 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from app.schemas.common import Qty
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.models.enums import DocStatus
+from app.schemas.inventory import LocationBasic, ProductBasic
 
 
 class DocumentLineIn(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     product_id: int
-    qty_demand: Decimal = Field(gt=0)
+    qty_demand: Qty = Field(gt=0, validation_alias=AliasChoices("qty_demand", "qty"))
 
 
 class DocumentLineOut(BaseModel):
@@ -21,8 +25,8 @@ class DocumentLineOut(BaseModel):
     product_name: str
     sku: str
     uom: str
-    qty_demand: Decimal
-    qty_done: Decimal
+    qty_demand: Qty
+    qty_done: Qty
 
 
 class DocumentIn(BaseModel):
@@ -51,9 +55,11 @@ class DocumentUpdate(BaseModel):
 
 
 class DocumentLinePatch(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     product_id: int
-    qty_demand: Decimal = Field(gt=0)
-    qty_done: Decimal = Field(default=Decimal(0), ge=0)
+    qty_demand: Qty = Field(gt=0, validation_alias=AliasChoices("qty_demand", "qty"))
+    qty_done: Qty = Field(default=Decimal(0), ge=0)
 
 
 class LocationBrief(BaseModel):
@@ -92,7 +98,7 @@ class DocumentSummary(BaseModel):
     validated_at: datetime | None
     created_at: datetime
     line_count: int
-    total_qty: Decimal
+    total_qty: Qty
 
 
 class DocumentPage(BaseModel):
@@ -107,7 +113,7 @@ class AdjustmentIn(BaseModel):
 
     product_id: int
     location_id: int
-    counted_qty: Decimal = Field(ge=0)
+    counted_qty: Qty = Field(ge=0)
     reason: str | None = Field(default=None, max_length=255)
 
 
@@ -117,7 +123,7 @@ class MoveOut(BaseModel):
     product_name: str
     sku: str
     uom: str
-    qty: Decimal
+    qty: Qty
     from_location_name: str
     to_location_name: str
     done_at: datetime
@@ -133,6 +139,31 @@ class MovePage(BaseModel):
     page_size: int
 
 
+class StockMoveOut(BaseModel):
+    """One row of the ledger, as Move History reads it."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    document_id: int | None
+    product: ProductBasic
+    from_location: LocationBasic
+    to_location: LocationBasic
+    qty: Qty
+    done_at: datetime
+
+
 VALID_MANUAL_STATUSES = (DocStatus.DRAFT, DocStatus.WAITING, DocStatus.READY)
 
 DocumentUpdate.model_rebuild()
+
+
+class AdjustmentOut(BaseModel):
+    """What a count did. `adjusted` is false when the count already matched."""
+
+    adjusted: bool
+    message: str
+    recorded_qty: Qty
+    counted_qty: Qty
+    difference: Qty
+    reference: str | None

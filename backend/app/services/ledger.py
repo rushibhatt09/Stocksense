@@ -50,6 +50,43 @@ def _warehouse_prefix(src: Location, dest: Location) -> str:
     return "WH"
 
 
+# What each operation is allowed to look like. Stock arrives from a vendor,
+# leaves to a customer, moves between real locations, or is corrected against the
+# adjustment location: anything else is a mistake worth refusing early.
+SHAPES = {
+    DocType.RECEIPT: ((LocationType.VENDOR,), LocationType.PHYSICAL),
+    DocType.DELIVERY: (LocationType.PHYSICAL, (LocationType.CUSTOMER,)),
+    DocType.INTERNAL: (LocationType.PHYSICAL, LocationType.PHYSICAL),
+}
+
+
+def _check_shape(doc_type: str, src: Location, dest: Location) -> None:
+    if doc_type == DocType.ADJUSTMENT:
+        # One end is the adjustment location, the other a real one; either way round.
+        ends = {src.type, dest.type}
+        if LocationType.ADJUSTMENT not in ends or not ends & set(LocationType.PHYSICAL):
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "An adjustment moves stock between a real location and the "
+                    "Inventory Adjustment location"
+                ),
+            )
+        return
+
+    allowed_src, allowed_dest = SHAPES[doc_type]
+    if src.type not in allowed_src or dest.type not in allowed_dest:
+        expected = {
+            DocType.RECEIPT: "from a vendor location into a real one",
+            DocType.DELIVERY: "from a real location out to a customer location",
+            DocType.INTERNAL: "between two real locations",
+        }[doc_type]
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"A {doc_type} moves stock {expected}",
+        )
+
+
 def next_reference(db: Session, doc_type: str, src: Location, dest: Location) -> str:
     prefix = f"{_warehouse_prefix(src, dest)}/{DocType.PREFIX[doc_type]}/"
     used = db.scalar(
@@ -85,6 +122,7 @@ def create_document(
 
     src = get_location(db, src_location_id)
     dest = get_location(db, dest_location_id)
+    _check_shape(doc_type, src, dest)
     if src.id == dest.id:
         raise HTTPException(
             status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -97,7 +135,7 @@ def create_document(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Product {product_id} does not exist",
             )
-        if qty <= 0:
+        if qty < 0 or (qty == 0 and doc_type != DocType.ADJUSTMENT):
             raise HTTPException(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Every line needs a quantity greater than zero",
@@ -134,6 +172,54 @@ def create_document(
     return document
 
 
+def _validate_adjustment(
+    db: Session,
+    document: Document,
+    src: Location,
+    dest: Location,
+    now: datetime,
+) -> None:
+    """Apply a physical count: move the difference, in whichever direction it falls.
+
+    The line quantity is what was counted, not what should move. The difference is
+    worked out here, at validation time, so a count typed ten minutes ago cannot
+    quietly overwrite stock that has moved since.
+    """
+    physical = src if src.type in LocationType.PHYSICAL else dest
+    counterpart = dest if physical is src else src
+
+    for line in document.lines:
+        counted = Decimal(str(line.qty_demand))
+        recorded = on_hand(db, line.product_id, physical.id)
+        difference = counted - recorded
+
+        if difference == 0:
+            # Nothing moved, so nothing is written to the ledger.
+            line.qty_done = Decimal(0)
+            continue
+
+        # A surplus flows in from the adjustment location, a shortfall flows back.
+        from_id, to_id = (
+            (counterpart.id, physical.id) if difference > 0 else (physical.id, counterpart.id)
+        )
+        line.qty_done = abs(difference)
+        db.add(
+            StockMove(
+                document_id=document.id,
+                product_id=line.product_id,
+                from_location_id=from_id,
+                to_location_id=to_id,
+                qty=abs(difference),
+                done_at=now,
+            )
+        )
+
+    document.status = DocStatus.DONE
+    document.validated_at = now
+    db.commit()
+    db.refresh(document)
+
+
 def validate_document(db: Session, document: Document, user_id: int | None = None) -> Document:
     """Append the document's moves to the ledger and mark it done."""
     if document.status == DocStatus.DONE:
@@ -153,7 +239,12 @@ def validate_document(db: Session, document: Document, user_id: int | None = Non
         )
 
     src = get_location(db, document.src_location_id)
+    dest = get_location(db, document.dest_location_id)
     now = datetime.now(UTC)
+
+    if document.doc_type == DocType.ADJUSTMENT:
+        _validate_adjustment(db, document, src, dest, now)
+        return document
 
     for line in document.lines:
         # A line that was not picked falls back to the requested quantity.
@@ -215,6 +306,54 @@ def cancel_document(db: Session, document: Document) -> Document:
     db.commit()
     db.refresh(document)
     return document
+
+
+def delete_document(db: Session, document: Document) -> None:
+    """Remove a document that never moved stock. Validated ones are permanent."""
+    if document.status == DocStatus.DONE:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                f"{document.reference} is validated and part of the ledger. Correct it "
+                "with an inventory adjustment instead."
+            ),
+        )
+    db.delete(document)
+    db.commit()
+
+
+def record_adjustment(
+    db: Session,
+    *,
+    product_id: int,
+    location_id: int,
+    counted_qty: Decimal,
+    created_by: int | None = None,
+    reason: str | None = None,
+) -> Document:
+    """Correct recorded stock to match a physical count.
+
+    Returns the adjustment document. It carries no moves when the count already
+    matched what was recorded, because nothing moved.
+    """
+    location = get_location(db, location_id)
+    if location.type not in LocationType.PHYSICAL:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Stock can only be counted at a real storage location",
+        )
+
+    counterpart = virtual_location(db, LocationType.ADJUSTMENT)
+    document = create_document(
+        db,
+        doc_type=DocType.ADJUSTMENT,
+        src_location_id=counterpart.id,
+        dest_location_id=location_id,
+        lines=[(product_id, counted_qty)],
+        created_by=created_by,
+        note=reason,
+    )
+    return validate_document(db, document, created_by)
 
 
 def record_opening_stock(

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_manager, get_current_user
 from app.db.session import get_db
 from app.models.enums import LocationType
 from app.models.inventory import Category, Location, Warehouse
@@ -26,7 +26,7 @@ def list_categories(db: Session = Depends(get_db)) -> list[Category]:
     return list(db.scalars(select(Category).order_by(Category.name)))
 
 
-@router.post("/categories", response_model=CategoryOut, status_code=status.HTTP_201_CREATED)
+@router.post("/categories", dependencies=[Depends(get_current_manager)], response_model=CategoryOut, status_code=status.HTTP_201_CREATED)
 def create_category(payload: CategoryIn, db: Session = Depends(get_db)) -> Category:
     if db.scalar(select(Category).where(Category.name == payload.name)) is not None:
         raise HTTPException(
@@ -44,7 +44,7 @@ def list_warehouses(db: Session = Depends(get_db)) -> list[Warehouse]:
     return list(db.scalars(select(Warehouse).order_by(Warehouse.code)))
 
 
-@router.post("/warehouses", response_model=WarehouseOut, status_code=status.HTTP_201_CREATED)
+@router.post("/warehouses", dependencies=[Depends(get_current_manager)], response_model=WarehouseOut, status_code=status.HTTP_201_CREATED)
 def create_warehouse(payload: WarehouseIn, db: Session = Depends(get_db)) -> Warehouse:
     code = payload.code.upper()
     if db.scalar(select(Warehouse).where(Warehouse.code == code)) is not None:
@@ -69,6 +69,20 @@ def create_warehouse(payload: WarehouseIn, db: Session = Depends(get_db)) -> War
     return warehouse
 
 
+@router.get("/warehouses/{warehouse_id}/locations", response_model=list[LocationOut])
+def list_warehouse_locations(
+    warehouse_id: int, db: Session = Depends(get_db)
+) -> list[Location]:
+    """The locations inside one warehouse."""
+    if db.get(Warehouse, warehouse_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Warehouse not found")
+    return list(
+        db.scalars(
+            select(Location).where(Location.warehouse_id == warehouse_id).order_by(Location.code)
+        )
+    )
+
+
 @router.get("/locations", response_model=list[LocationOut])
 def list_locations(
     db: Session = Depends(get_db),
@@ -86,7 +100,7 @@ def list_locations(
     return list(db.scalars(stmt))
 
 
-@router.post("/locations", response_model=LocationOut, status_code=status.HTTP_201_CREATED)
+@router.post("/locations", dependencies=[Depends(get_current_manager)], response_model=LocationOut, status_code=status.HTTP_201_CREATED)
 def create_location(payload: LocationIn, db: Session = Depends(get_db)) -> Location:
     code = payload.code.upper()
     if db.scalar(select(Location).where(Location.code == code)) is not None:
@@ -96,12 +110,16 @@ def create_location(payload: LocationIn, db: Session = Depends(get_db)) -> Locat
     if payload.warehouse_id is not None and db.get(Warehouse, payload.warehouse_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Warehouse not found")
 
+    if payload.type not in LocationType.ALL:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown location type '{payload.type}'",
+        )
+
     location = Location(
         name=payload.name,
         code=code,
-        # Locations created through the API are always real storage; the virtual
-        # ones are fixed and come from the seed.
-        type=LocationType.INTERNAL,
+        type=payload.type,
         warehouse_id=payload.warehouse_id,
         parent_id=payload.parent_id,
     )

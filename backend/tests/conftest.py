@@ -52,6 +52,70 @@ def signed_up(client: TestClient) -> dict[str, str]:
     return credentials
 
 
+def _signup_and_login(client: TestClient, email: str, role: str) -> dict[str, str]:
+    credentials = {"name": role.title(), "email": email, "password": "supersecret1", "role": role}
+    assert client.post("/auth/signup", json=credentials).status_code == 201
+    token = client.post(
+        "/auth/login", json={"email": email, "password": credentials["password"]}
+    ).json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture()
+def manager_headers(client: TestClient) -> dict[str, str]:
+    return _signup_and_login(client, "manager@example.com", "manager")
+
+
+@pytest.fixture()
+def staff_headers(client: TestClient) -> dict[str, str]:
+    return _signup_and_login(client, "staff@example.com", "staff")
+
+
+@pytest.fixture()
+def warehouse_setup(client: TestClient, manager_headers: dict[str, str]) -> dict:
+    """A warehouse with one physical location, plus the four virtual
+    counterparts every receipt/delivery/transfer/adjustment balances against."""
+    h = manager_headers
+    warehouse = client.post(
+        "/warehouses", json={"name": "Main Warehouse", "code": "WH1"}, headers=h
+    ).json()
+    main_store = client.post(
+        "/locations",
+        json={"name": "Main Store", "code": "WH1/MAIN", "type": "internal", "warehouse_id": warehouse["id"]},
+        headers=h,
+    ).json()
+    rack_b = client.post(
+        "/locations",
+        json={"name": "Rack B", "code": "WH1/RACKB", "type": "internal", "warehouse_id": warehouse["id"]},
+        headers=h,
+    ).json()
+    vendors = client.post(
+        "/locations", json={"name": "Vendors", "code": "VIRT/VENDORS", "type": "vendor"}, headers=h
+    ).json()
+    customers = client.post(
+        "/locations", json={"name": "Customers", "code": "VIRT/CUSTOMERS", "type": "customer"}, headers=h
+    ).json()
+    adjustment = client.post(
+        "/locations",
+        json={"name": "Inventory Adjustment", "code": "VIRT/ADJUST", "type": "adjustment"},
+        headers=h,
+    ).json()
+    product = client.post(
+        "/products",
+        json={"name": "Steel Rods", "sku": "STL-001", "uom": "kg", "reorder_point": 20, "reorder_qty": 100},
+        headers=h,
+    ).json()
+    return {
+        "warehouse": warehouse,
+        "main_store": main_store,
+        "rack_b": rack_b,
+        "vendors": vendors,
+        "customers": customers,
+        "adjustment": adjustment,
+        "product": product,
+    }
+
+
 @pytest.fixture()
 def auth_headers(client: TestClient, signed_up: dict[str, str]) -> dict[str, str]:
     token = client.post(

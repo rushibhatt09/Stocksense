@@ -130,3 +130,29 @@ def low_stock_products(db: Session, limit: int | None = None) -> list[tuple[Prod
     if limit is not None:
         stmt = stmt.limit(limit)
     return [(row[0], Decimal(str(row[1]))) for row in db.execute(stmt)]
+
+
+# --- Compatibility helpers -------------------------------------------------
+# The dashboard and Move History routes were written against these names. They
+# sit on the same ledger queries above and return floats, which is all a KPI
+# tile or a badge needs; anything that must be exact keeps using the Decimal
+# functions above.
+
+
+def stock_on_hand(db: Session, product_id: int, location_id: int | None = None) -> float:
+    """On-hand for a product, at one location or across all physical locations."""
+    if location_id is not None:
+        return float(on_hand(db, product_id, location_id))
+    return float(on_hand_totals(db, [product_id]).get(product_id, Decimal(0)))
+
+
+def bulk_on_hand(db: Session, product_ids: list[int] | None = None) -> dict[int, float]:
+    """On-hand for many products in one query, for list and dashboard screens."""
+    return {
+        product_id: float(total)
+        for product_id, total in on_hand_totals(db, product_ids).items()
+    }
+
+
+def is_low_stock(on_hand_qty: float | Decimal, reorder_point: float | Decimal) -> bool:
+    return float(on_hand_qty) <= float(reorder_point)

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_manager, get_current_user
 from app.db.session import get_db
 from app.models.inventory import Category, Product
 from app.models.user import User
@@ -39,6 +39,7 @@ def list_products(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
     q: str | None = Query(default=None, description="Matches name or SKU."),
+    search: str | None = Query(default=None, description="Alias of q."),
     category_id: int | None = None,
     low_stock: bool = False,
     include_inactive: bool = False,
@@ -54,8 +55,9 @@ def list_products(
         .outerjoin(Category, Category.id == Product.category_id)
     )
 
-    if q:
-        pattern = f"%{q.strip()}%"
+    term = q or search
+    if term:
+        pattern = f"%{term.strip()}%"
         stmt = stmt.where(or_(Product.name.ilike(pattern), Product.sku.ilike(pattern)))
     if category_id is not None:
         stmt = stmt.where(Product.category_id == category_id)
@@ -81,7 +83,7 @@ def list_products(
 def create_product(
     payload: ProductIn,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_manager),
 ) -> ProductOut:
     sku = payload.sku.strip().upper()
     if db.scalar(select(Product).where(Product.sku == sku)) is not None:
@@ -146,7 +148,7 @@ def update_product(
     product_id: int,
     payload: ProductUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(get_current_manager),
 ) -> ProductOut:
     product = db.get(Product, product_id)
     if product is None:

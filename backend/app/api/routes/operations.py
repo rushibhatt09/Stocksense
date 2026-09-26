@@ -24,7 +24,13 @@ from app.schemas.operations import (
     DocumentSummary,
     DocumentUpdate,
 )
-from app.services.ledger import cancel_document, create_document, validate_document, virtual_location
+from app.services.ledger import (
+    cancel_document,
+    create_document,
+    delete_document,
+    validate_document,
+    virtual_location,
+)
 
 router = APIRouter(prefix="/operations", tags=["operations"])
 
@@ -306,3 +312,26 @@ def cancel_operation(
     document = _load(db, document_id)
     cancel_document(db, document)
     return _to_out(_load(db, document_id))
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_operation(
+    document_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> None:
+    """Drop a document that was never validated."""
+    delete_document(db, _load(db, document_id))
+
+
+# The same handlers mounted a second time at /documents, because the operations
+# API was built under both names during the hackathon. One engine, two URLs:
+# the logic exists once and both spellings stay valid.
+documents_router = APIRouter(prefix="/documents", tags=["documents"])
+for _route in list(router.routes):
+    documents_router.add_api_route(
+        _route.path.removeprefix(router.prefix) or "",
+        _route.endpoint,
+        methods=sorted(_route.methods),
+        response_model=_route.response_model,
+        status_code=_route.status_code,
+        name=f"documents_{_route.name}",
+    )
