@@ -50,3 +50,25 @@ def signed_up(client: TestClient) -> dict[str, str]:
     response = client.post("/auth/signup", json=credentials)
     assert response.status_code == 201, response.text
     return credentials
+
+
+@pytest.fixture()
+def auth_headers(client: TestClient, signed_up: dict[str, str]) -> dict[str, str]:
+    token = client.post(
+        "/auth/login", json={"email": signed_up["email"], "password": signed_up["password"]}
+    ).json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture()
+def seeded(client: TestClient) -> None:
+    """Warehouses, locations, categories and products, as the seed script creates them."""
+    from app.db.session import get_db
+    from app.main import app
+    from app.seed import seed
+
+    db = next(app.dependency_overrides[get_db]())
+    try:
+        seed(db)
+    finally:
+        db.close()
