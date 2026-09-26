@@ -11,7 +11,8 @@ class Settings(BaseSettings):
     # sets DATABASE_URL to Postgres.
     DATABASE_URL: str = "sqlite:///./stocksense.db"
 
-    SECRET_KEY: str = "dev-secret-change-me"
+    # Long enough for HS256. Always overridden via .env outside development.
+    SECRET_KEY: str = "dev-only-secret-key-change-me-before-any-real-deployment"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 720
 
