@@ -20,7 +20,7 @@ export default function SettingsWarehouses() {
   });
   const locationsQuery = useQuery({
     queryKey: ["locations"],
-    queryFn: () => api<Location[]>("/locations"),
+    queryFn: () => api<Location[]>("/locations", { params: { physical_only: false } }),
   });
 
   const [warehouseModalOpen, setWarehouseModalOpen] = useState(false);

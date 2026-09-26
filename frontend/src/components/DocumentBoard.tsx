@@ -8,7 +8,7 @@ import type { LineDraft } from "./LineItemsEditor";
 import Modal from "./Modal";
 import PageHeader from "./PageHeader";
 import StatusBadge from "./StatusBadge";
-import { ApiError, api, fetchProducts } from "../lib/api";
+import { ApiError, api, fetchProducts, fetchDocuments } from "../lib/api";
 import type { Document, DocType, Location, LocationType } from "../lib/types";
 
 /** Which side of the document the user picks a physical location for, and
@@ -84,14 +84,17 @@ export default function DocumentBoard({ docType }: { docType: DocType }) {
   const documentsQuery = useQuery({
     queryKey: ["documents", docType, statusFilter],
     queryFn: () =>
-      api<Document[]>("/documents", {
-        params: { doc_type: docType, status: statusFilter === "all" ? undefined : statusFilter },
+      fetchDocuments({
+        doc_type: docType,
+        status: statusFilter === "all" ? undefined : statusFilter,
       }),
   });
 
   const locationsQuery = useQuery({
     queryKey: ["locations"],
-    queryFn: () => api<Location[]>("/locations"),
+    // physical_only=false so the vendor, customer and adjustment locations
+    // come back too: a receipt needs the Vendors location as its source.
+    queryFn: () => api<Location[]>("/locations", { params: { physical_only: false } }),
   });
 
   const productsQuery = useQuery({

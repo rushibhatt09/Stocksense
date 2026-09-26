@@ -1,4 +1,4 @@
-import type { Page, Product } from "./types";
+import type { Document, Page, Product } from "./types";
 
 /** Thin fetch wrapper: adds the base URL, the bearer token and surfaces API errors. */
 
@@ -79,6 +79,16 @@ export async function fetchProducts(
   params: Record<string, string | number | boolean | undefined> = {},
 ): Promise<Product[]> {
   const page = await api<Page<Product>>("/products", {
+    params: { page_size: 200, ...params },
+  });
+  return page.items;
+}
+
+/** Fetch documents (receipts, deliveries, transfers, adjustments) as plain rows. */
+export async function fetchDocuments(
+  params: Record<string, string | number | boolean | undefined> = {},
+): Promise<Document[]> {
+  const page = await api<Page<Document>>("/documents", {
     params: { page_size: 200, ...params },
   });
   return page.items;

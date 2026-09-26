@@ -102,7 +102,7 @@ class DocumentSummary(BaseModel):
 
 
 class DocumentPage(BaseModel):
-    items: list[DocumentSummary]
+    items: list[DocumentOut]
     total: int
     page: int
     page_size: int

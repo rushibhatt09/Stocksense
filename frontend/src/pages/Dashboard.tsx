@@ -12,8 +12,8 @@ import { useQuery } from "@tanstack/react-query";
 
 import PageHeader from "../components/PageHeader";
 import StatusBadge from "../components/StatusBadge";
-import { api } from "../lib/api";
-import type { DashboardSummary, Document, Warehouse } from "../lib/types";
+import { api, fetchDocuments } from "../lib/api";
+import type { DashboardSummary, Warehouse } from "../lib/types";
 
 const DOC_TYPE_LABELS: Record<string, string> = {
   receipt: "Receipt",
@@ -40,12 +40,10 @@ export default function Dashboard() {
   const documentsQuery = useQuery({
     queryKey: ["documents", "dashboard", docType, status, warehouseId],
     queryFn: () =>
-      api<Document[]>("/documents", {
-        params: {
-          doc_type: docType || undefined,
-          status: status || undefined,
-          warehouse_id: warehouseId || undefined,
-        },
+      fetchDocuments({
+        doc_type: docType || undefined,
+        status: status || undefined,
+        warehouse_id: warehouseId || undefined,
       }),
   });
 

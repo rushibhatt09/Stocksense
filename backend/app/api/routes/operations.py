@@ -4,11 +4,9 @@ All three are the same document with different endpoints of the move, which is
 why they share one create, one validate and one cancel.
 """
 
-from decimal import Decimal
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
@@ -21,7 +19,6 @@ from app.schemas.operations import (
     DocumentIn,
     DocumentOut,
     DocumentPage,
-    DocumentSummary,
     DocumentUpdate,
 )
 from app.services.ledger import (
@@ -114,30 +111,13 @@ def list_operations(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=200),
 ) -> DocumentPage:
-    src = Location.__table__.alias("src")
-    dest = Location.__table__.alias("dest")
-
-    totals = (
-        select(
-            DocumentLine.document_id.label("document_id"),
-            func.count().label("line_count"),
-            func.coalesce(func.sum(DocumentLine.qty_demand), 0).label("total_qty"),
-        )
-        .group_by(DocumentLine.document_id)
-        .subquery("line_totals")
-    )
+    src = aliased(Location)
+    dest = aliased(Location)
 
     stmt = (
-        select(
-            Document,
-            src.c.name.label("src_location_name"),
-            dest.c.name.label("dest_location_name"),
-            func.coalesce(totals.c.line_count, 0).label("line_count"),
-            func.coalesce(totals.c.total_qty, 0).label("total_qty"),
-        )
-        .join(src, src.c.id == Document.src_location_id)
-        .join(dest, dest.c.id == Document.dest_location_id)
-        .outerjoin(totals, totals.c.document_id == Document.id)
+        select(Document)
+        .join(src, src.id == Document.src_location_id)
+        .join(dest, dest.id == Document.dest_location_id)
     )
 
     if doc_type:
@@ -158,9 +138,7 @@ def list_operations(
 
     if warehouse_id is not None:
         # A document belongs to a warehouse if either end of the move is in it.
-        stmt = stmt.where(
-            or_(src.c.warehouse_id == warehouse_id, dest.c.warehouse_id == warehouse_id)
-        )
+        stmt = stmt.where(or_(src.warehouse_id == warehouse_id, dest.warehouse_id == warehouse_id))
 
     if category_id is not None:
         stmt = stmt.where(
@@ -178,30 +156,22 @@ def list_operations(
         )
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    rows = db.execute(
-        stmt.order_by(Document.created_at.desc(), Document.id.desc())
+
+    # The list screens show the route and the line count, so the rows come back
+    # whole rather than as a summary; eager loading keeps it to a few queries.
+    documents = db.scalars(
+        stmt.options(
+            selectinload(Document.lines).selectinload(DocumentLine.product),
+            selectinload(Document.src_location),
+            selectinload(Document.dest_location),
+        )
+        .order_by(Document.created_at.desc(), Document.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
 
     return DocumentPage(
-        items=[
-            DocumentSummary(
-                id=row[0].id,
-                reference=row[0].reference,
-                doc_type=row[0].doc_type,
-                status=row[0].status,
-                partner_name=row[0].partner_name,
-                src_location_name=row[1],
-                dest_location_name=row[2],
-                scheduled_at=row[0].scheduled_at,
-                validated_at=row[0].validated_at,
-                created_at=row[0].created_at,
-                line_count=row[3],
-                total_qty=Decimal(str(row[4])),
-            )
-            for row in rows
-        ],
+        items=[_to_out(document) for document in documents],
         total=total,
         page=page,
         page_size=page_size,
