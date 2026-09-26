@@ -1,3 +1,5 @@
+import type { Page, Product } from "./types";
+
 /** Thin fetch wrapper: adds the base URL, the bearer token and surfaces API errors. */
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -66,4 +68,18 @@ export async function api<T>(path: string, options: Options = {}): Promise<T> {
   }
 
   return payload as T;
+}
+
+/** Fetch products, unwrapping the paged response into plain rows.
+
+Page size is generous on purpose: every screen that calls this wants a complete
+list to pick from, not one page of it.
+*/
+export async function fetchProducts(
+  params: Record<string, string | number | boolean | undefined> = {},
+): Promise<Product[]> {
+  const page = await api<Page<Product>>("/products", {
+    params: { page_size: 200, ...params },
+  });
+  return page.items;
 }
