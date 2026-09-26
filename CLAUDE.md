@@ -482,8 +482,11 @@ alembic upgrade head
 - ✅ Stock-on-hand service derived from the `stock_moves` ledger (`app/services/stock.py`)
 - ✅ Demo data seeding
 - ✅ Backend test suite: 36 tests passing (auth, inventory, operations)
-- 🚧 Frontend pages (placeholders — UI Agent's turn next)
-- 🚧 Email integration for OTP (dev mode prints/returns the code instead)
+- ✅ Frontend pages wired to the live API (Dashboard, Products, Receipts,
+  Deliveries, Transfers, Adjustments, Move History, Warehouses, Forgot Password)
+- 🚧 Email integration for OTP (dev mode prints/returns the code instead;
+  the frontend shows it inline on the forgot-password screen)
+- 🚧 Frontend automated tests (backend already at 36 passing tests)
 
 ---
 
@@ -492,9 +495,11 @@ alembic upgrade head
 1. ✅ ~~**Auth/Guard Agent**: Complete auth guards & role-based middleware~~
 2. ✅ ~~**Inventory Agent**: Implement product & warehouse API routes~~
 3. ✅ ~~**Operations Agent**: Implement document & stock move logic~~
-4. **UI Agent**: Build and integrate frontend pages against the now-complete API
-5. **Testing**: Frontend test coverage (backend already at 36 passing tests)
+4. ✅ ~~**UI Agent**: Build and integrate frontend pages against the API~~
+5. **Testing**: Frontend automated tests (Vitest/Playwright — none yet)
 6. **Email**: SMTP setup for OTP in production
+7. **Polish**: pagination on long lists, richer edit flows (e.g. editing an
+   existing document's lines from the UI, not just create/validate/cancel)
 
 See `AGENTS.md` for the full endpoint list each agent owns.
 
