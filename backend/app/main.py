@@ -3,7 +3,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, catalog, operations, products
+from app.api.routes import (
+    adjustments,
+    auth,
+    catalog,
+    dashboard,
+    operations,
+    products,
+    stock_moves,
+)
 from app.core.config import settings
 
 app = FastAPI(
@@ -20,11 +28,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 app.include_router(auth.router)
 app.include_router(products.router)
-app.include_router(operations.router)
 app.include_router(catalog.router)
+app.include_router(operations.router)
+app.include_router(operations.documents_router)
+app.include_router(adjustments.router)
+app.include_router(stock_moves.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/health", tags=["meta"])
