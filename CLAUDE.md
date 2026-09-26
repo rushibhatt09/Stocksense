@@ -178,6 +178,27 @@ The system uses an **append-only stock ledger** (`stock_moves` table) as the sin
 - Health check endpoint
 - Response: `{"status": "ok", "service": "StockSense API"}`
 
+### Inventory Endpoints (manager-only writes, any authenticated user can read)
+
+- `GET/POST /categories`, `PUT/DELETE /categories/{id}`
+- `GET/POST /warehouses`, `GET/PUT/DELETE /warehouses/{id}`, `GET /warehouses/{id}/locations`
+- `GET/POST /locations` (filter by `warehouse_id`, `type`), `GET/PUT/DELETE /locations/{id}`
+- `GET/POST /products` (filter by `category_id`, `is_active`, `low_stock`, `search`), `GET/PUT/DELETE /products/{id}`
+- `GET /products/{id}/stock` — on-hand quantity broken down per physical location
+
+Product creation accepts optional `initial_stock` + `initial_stock_location_id`, recorded as a stock move from the Inventory Adjustment virtual location.
+
+### Operations Endpoints (any authenticated user — managers and staff both perform operations)
+
+- `GET/POST /documents` (filter by `doc_type`, `status`, `warehouse_id`, `location_id`) — one endpoint for receipts, deliveries, internal transfers and adjustments, distinguished by `doc_type`
+- `GET/PUT/DELETE /documents/{id}` (edit/delete only while still Draft/Waiting)
+- `POST /documents/{id}/validate` — turns the document's lines into `stock_moves` and marks it Done
+- `POST /documents/{id}/cancel`
+- `GET /stock-moves` (filter by `product_id`, `location_id`, `document_id`, `from_date`, `to_date`) — Move History
+- `GET /dashboard/summary` — the KPI tiles (total in stock, low/out-of-stock, pending receipts/deliveries/transfers/adjustments)
+
+See `app/services/documents.py` for the per-doc_type location-type rules (e.g. a receipt's source must be a Vendor location, its destination a physical one) and how adjustment lines compare counted vs. on-hand quantity to decide move direction.
+
 ---
 
 ## Frontend Structure
@@ -455,23 +476,27 @@ alembic upgrade head
 - ✅ Backend scaffolding complete
 - ✅ Auth system with JWT + OTP
 - ✅ Database schema & migrations
-- ✅ Frontend scaffolding with routing
+- ✅ Role-based guards (`get_current_manager` in `app/api/deps.py`)
+- ✅ Inventory API: products, categories, warehouses, locations (`app/api/routes/`)
+- ✅ Operations API: documents (receipts/deliveries/transfers/adjustments), stock moves, dashboard
+- ✅ Stock-on-hand service derived from the `stock_moves` ledger (`app/services/stock.py`)
 - ✅ Demo data seeding
-- 🚧 API routes (incomplete)
-- 🚧 Frontend pages (placeholders)
-- 🚧 Email integration for OTP
-- 🚧 Role-based guards on routes
+- ✅ Backend test suite: 36 tests passing (auth, inventory, operations)
+- 🚧 Frontend pages (placeholders — UI Agent's turn next)
+- 🚧 Email integration for OTP (dev mode prints/returns the code instead)
 
 ---
 
 ## Next Steps (Prioritized)
 
-1. **Auth/Guard Agent**: Complete auth guards & role-based middleware
-2. **Inventory Agent**: Implement product & warehouse API routes
-3. **Operations Agent**: Implement document & stock move logic
-4. **UI Agent**: Build and integrate frontend pages
-5. **Testing**: Unit & integration test coverage
+1. ✅ ~~**Auth/Guard Agent**: Complete auth guards & role-based middleware~~
+2. ✅ ~~**Inventory Agent**: Implement product & warehouse API routes~~
+3. ✅ ~~**Operations Agent**: Implement document & stock move logic~~
+4. **UI Agent**: Build and integrate frontend pages against the now-complete API
+5. **Testing**: Frontend test coverage (backend already at 36 passing tests)
 6. **Email**: SMTP setup for OTP in production
+
+See `AGENTS.md` for the full endpoint list each agent owns.
 
 ---
 
